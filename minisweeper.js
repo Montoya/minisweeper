@@ -279,12 +279,23 @@ const statsMinisweeper = () => {
       </div>
       <hr />
       <div>
-        <a href="#" onclick="cancelRestartMiniSweeper();return false" style="display:inline-block;text-align:center;width:100%">Go Back</a>
+        <a href="#" onclick="goBackMinisweeper();return false" style="display:inline-block;text-align:center;width:100%">Go Back</a>
       </div>
     </div>
 `
   ); 
   return false;
+}
+
+const goBackMinisweeper = () => { 
+  if(minisweeperState.board.indexOf(19)==-1) { 
+    outcome = "lose"; 
+  }
+  else if(minisweeperState.board.filter(el => el > 9).length < 11) { 
+    outcome = "win";
+  } 
+  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks, outcome); 
+  return false; 
 }
 
 var minisweeperState; 
