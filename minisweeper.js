@@ -211,7 +211,7 @@ const displayBoard = (element, board, marks, outcome) => {
 `
   <div id="minisweeper-controls">
     <div>
-      <div>${outcome=="win" ? "😎 You won! Want to play again?" : "😵 Sorry, you lost. Try again?"}</div>
+      <div>${outcome=="win" ? "😎 You won! Play again?" : "😵 You lost. Try again?"}</div>
     </div>
     <div>
       <div><a href="#" onclick="statsMinisweeper();return false">📊</a></div>
