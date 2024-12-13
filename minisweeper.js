@@ -288,6 +288,7 @@ const statsMinisweeper = () => {
 }
 
 const goBackMinisweeper = () => { 
+  let outcome; 
   if(minisweeperState.board.indexOf(19)==-1) { 
     outcome = "lose"; 
   }
