@@ -69,9 +69,68 @@ function getHTMLforCell(num, x, y, marks, outcome) {
         case "confirm": 
           return '<span class="minisweeper-cell minisweeper-unrevealed">&nbsp</span>'; 
         default: 
-          return `<span onclick="attempt(${x},${y});return false" oncontextmenu="mark(${x},${y});return false" class="minisweeper-cell minisweeper-unrevealed">${-1!=marks.indexOf(`${x}-${y}`) ? "🚩" : "&nbsp;"}</span>`; 
+          return `<span onclick="clickCell(${x},${y});return false" oncontextmenu="contextMenuCell(event,${x},${y});return false" onpointerdown="startCellPress(event)" onpointermove="moveCellPress(event)" onpointerup="endCellPress(event,${x},${y})" onpointercancel="cancelCellPress(event)" class="minisweeper-cell minisweeper-unrevealed">${-1!=marks.indexOf(`${x}-${y}`) ? "🚩" : "&nbsp;"}</span>`; 
       }
   }
+}
+
+let cellPress = null;
+let suppressTouchClick = false;
+const longPressMs = 500;
+
+function startCellPress(event) {
+  if(event.pointerType !== 'touch') return;
+  suppressTouchClick = false;
+  cellPress = {
+    pointerId: event.pointerId,
+    startedAt: Date.now(),
+    x: event.clientX,
+    y: event.clientY,
+    moved: false
+  };
+}
+
+function moveCellPress(event) {
+  if(!cellPress || event.pointerId !== cellPress.pointerId) return;
+  if(Math.hypot(event.clientX - cellPress.x, event.clientY - cellPress.y) > 10) {
+    cellPress.moved = true;
+  }
+}
+
+function cancelCellPress(event) {
+  if(cellPress && event.pointerId === cellPress.pointerId) cellPress = null;
+}
+
+function endCellPress(event, x, y) {
+  if(!cellPress || event.pointerId !== cellPress.pointerId) return;
+  const shouldMark = !cellPress.moved && Date.now() - cellPress.startedAt >= longPressMs;
+  cellPress = null;
+  if(shouldMark) {
+    suppressTouchClick = true;
+    event.preventDefault();
+    mark(x, y);
+  }
+}
+
+function clickCell(x, y) {
+  if(suppressTouchClick) {
+    suppressTouchClick = false;
+    return;
+  }
+  attempt(x, y);
+}
+
+function contextMenuCell(event, x, y) {
+  event.preventDefault();
+  if(cellPress) {
+    if(!cellPress.moved) {
+      suppressTouchClick = true;
+      cellPress = null;
+      mark(x, y);
+    }
+    return;
+  }
+  if(!suppressTouchClick && event.pointerType !== 'touch') mark(x, y);
 }
 
 function attempt(x,y) {
@@ -230,7 +289,7 @@ const displayBoard = (element, board, marks, outcome) => {
       <div><a href="#" onclick="statsMinisweeper();return false">📊</a></div>
     </div>
     <div>
-      <div>Right-click to 🚩</div>
+      <div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 'Long press to 🚩' : 'Right-click to 🚩'}</div>
       <div><a href="#" onclick="confirmRestartMinisweeper();return false">New game</a></div>
     </div>
   </div>

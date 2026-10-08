@@ -12,6 +12,10 @@
 .minisweeper-unrevealed { 
   border:2px outset #ececec;
   background:#c0c0c0; 
+  touch-action:manipulation;
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
 }
 #minisweeper-controls { 
   padding-top:12px;
