@@ -69,74 +69,28 @@ function getHTMLforCell(num, x, y, marks, outcome) {
         case "confirm": 
           return '<span class="minisweeper-cell minisweeper-unrevealed">&nbsp</span>'; 
         default: 
-          return `<span onclick="clickCell(${x},${y});return false" oncontextmenu="contextMenuCell(event,${x},${y});return false" onpointerdown="startCellPress(event)" onpointermove="moveCellPress(event)" onpointerup="endCellPress(event,${x},${y})" onpointercancel="cancelCellPress(event)" class="minisweeper-cell minisweeper-unrevealed">${-1!=marks.indexOf(`${x}-${y}`) ? "🚩" : "&nbsp;"}</span>`; 
+          return `<span onclick="attempt(${x},${y});return false" oncontextmenu="contextMenuCell(event,${x},${y});return false" class="minisweeper-cell minisweeper-unrevealed">${-1!=marks.indexOf(`${x}-${y}`) ? "🚩" : "&nbsp;"}</span>`;
       }
   }
 }
 
-let cellPress = null;
-let suppressTouchClick = false;
-const longPressMs = 500;
-
-function startCellPress(event) {
-  if(event.pointerType !== 'touch') return;
-  suppressTouchClick = false;
-  cellPress = {
-    pointerId: event.pointerId,
-    startedAt: Date.now(),
-    x: event.clientX,
-    y: event.clientY,
-    moved: false
-  };
-}
-
-function moveCellPress(event) {
-  if(!cellPress || event.pointerId !== cellPress.pointerId) return;
-  if(Math.hypot(event.clientX - cellPress.x, event.clientY - cellPress.y) > 10) {
-    cellPress.moved = true;
-  }
-}
-
-function cancelCellPress(event) {
-  if(cellPress && event.pointerId === cellPress.pointerId) cellPress = null;
-}
-
-function endCellPress(event, x, y) {
-  if(!cellPress || event.pointerId !== cellPress.pointerId) return;
-  const shouldMark = !cellPress.moved && Date.now() - cellPress.startedAt >= longPressMs;
-  cellPress = null;
-  if(shouldMark) {
-    suppressTouchClick = true;
-    event.preventDefault();
-    mark(x, y);
-  }
-}
-
-function clickCell(x, y) {
-  if(suppressTouchClick) {
-    suppressTouchClick = false;
-    return;
-  }
-  attempt(x, y);
-}
+let marking = false;
 
 function contextMenuCell(event, x, y) {
   event.preventDefault();
-  if(cellPress) {
-    if(!cellPress.moved) {
-      suppressTouchClick = true;
-      cellPress = null;
-      mark(x, y);
-    }
-    return;
-  }
-  if(!suppressTouchClick && event.pointerType !== 'touch') mark(x, y);
+  if(event.pointerType === 'touch' ||
+     (!event.pointerType && window.matchMedia('(hover: none) and (pointer: coarse)').matches)) return;
+  mark(x, y);
 }
 
 function attempt(x,y) {
   let outcome; 
   if(-1!=minisweeperState.marks.indexOf(`${x}-${y}`)) { 
     minisweeperState.marks.splice(minisweeperState.marks.indexOf(`${x}-${y}`), 1); 
+  }
+  else if(marking) {
+    mark(x, y);
+    return;
   }
   else { 
     sweep(minisweeperState.board, x, y); 
@@ -148,6 +102,7 @@ function attempt(x,y) {
     else if(minisweeperState.board.filter(el => el > 9).length < 11) { 
       // there are only bombs left, the player has won 
       minisweeperState.stats.wins += 1; 
+      minisweeperState.finishedAt = Date.now();
       outcome = "win"; 
     }
   }
@@ -228,6 +183,16 @@ function makeBoard() {
   return board; 
 }
 
+function formatElapsedTime(startedAt, finishedAt) {
+  const totalSeconds = Math.floor(Math.max(0, finishedAt - startedAt) / 1000);
+  const seconds = totalSeconds % 60;
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const hours = Math.floor(totalSeconds / 3600);
+  if(hours) return `${hours}h ${minutes}m ${seconds}s`;
+  if(minutes) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
 const displayBoard = (element, board, marks, outcome) => { 
   element.textContent = ''; 
   const boardLength = Math.sqrt(board.length); 
@@ -266,6 +231,13 @@ const displayBoard = (element, board, marks, outcome) => {
           ); 
   }
   else if(outcome) { 
+    const canShareWin = outcome=="win" && Number.isFinite(minisweeperState.startedAt) &&
+      Number.isFinite(minisweeperState.finishedAt);
+    const shareText = outcome=="lose"
+      ? "I'm playing Minesweeper on X. Play it here: https://montoya.github.io/minisweeper/"
+      : canShareWin
+        ? `I just beat Minesweeper in ${formatElapsedTime(minisweeperState.startedAt, minisweeperState.finishedAt)}! Think you can do better? Play it: https://montoya.github.io/minisweeper/`
+        : '';
     element.insertAdjacentHTML('beforeend', 
 `
   <div id="minisweeper-controls">
@@ -273,7 +245,9 @@ const displayBoard = (element, board, marks, outcome) => {
       <div>${outcome=="win" ? "😎 You won! Play again?" : "😵 You lost. Try again?"}</div>
     </div>
     <div>
-      <div><a href="#" onclick="statsMinisweeper();return false">📊</a></div>
+      <div>${shareText
+        ? `<a href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">Share</a>`
+        : '<a href="#" onclick="statsMinisweeper();return false">📊</a>'}</div>
       <div><a href="#" onclick="restartMinisweeper();return false">New game</a></div>
     </div>
   </div>
@@ -289,13 +263,23 @@ const displayBoard = (element, board, marks, outcome) => {
       <div><a href="#" onclick="statsMinisweeper();return false">📊</a></div>
     </div>
     <div>
-      <div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 'Long press to 🚩' : 'Right-click to 🚩'}</div>
+      <div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches
+        ? (marking
+          ? '<a href="#" onclick="setMarking(false);return false" aria-label="Click to sweep">Click to 🧹</a>'
+          : '<a href="#" onclick="setMarking(true);return false" aria-label="Click to flag">Click to 🚩</a>')
+        : 'Right-click to 🚩'}</div>
       <div><a href="#" onclick="confirmRestartMinisweeper();return false">New game</a></div>
     </div>
   </div>
 `
     ); 
   }
+}
+
+const setMarking = (value) => {
+  marking = value;
+  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks);
+  return false;
 }
 
 const confirmRestartMinisweeper = () => { 
@@ -309,8 +293,11 @@ const cancelRestartMiniSweeper = () => {
 }
 
 const restartMinisweeper = () => { 
+  marking = false;
   minisweeperState.board = makeBoard(); 
   minisweeperState.marks = []; 
+  minisweeperState.startedAt = Date.now();
+  minisweeperState.finishedAt = null;
   minisweeperState.stats.games++; 
   localStorage.setItem("minisweeperState", JSON.stringify(minisweeperState)); 
   startMinisweeper(minisweeperElement); 
@@ -367,7 +354,7 @@ const startMinisweeper = (element) => {
   if(minisweeperState) { 
     minisweeperState = JSON.parse(minisweeperState); 
   } else { 
-    minisweeperState = { board: makeBoard(), marks: [], stats: { games:1, wins: 0 }};
+    minisweeperState = { board: makeBoard(), marks: [], startedAt: Date.now(), finishedAt: null, stats: { games:1, wins: 0 }};
   } 
   let outcome; 
   if(minisweeperState.board.indexOf(19)==-1) { 
@@ -376,6 +363,9 @@ const startMinisweeper = (element) => {
   else if(minisweeperState.board.filter(el => el > 9).length < 11) { 
     outcome = "win";
   } 
+  if(outcome === undefined && !Number.isFinite(minisweeperState.startedAt)) {
+    minisweeperState.startedAt = Date.now();
+  }
   displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks, outcome); 
   localStorage.setItem("minisweeperState", JSON.stringify(minisweeperState)); 
 }
