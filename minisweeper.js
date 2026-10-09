@@ -265,8 +265,8 @@ const displayBoard = (element, board, marks, outcome) => {
     <div>
       <div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches
         ? (marking
-          ? '<a href="#" onclick="setMarking(false);return false" aria-label="Click to sweep">Click to 🧹</a>'
-          : '<a href="#" onclick="setMarking(true);return false" aria-label="Click to flag">Click to 🚩</a>')
+          ? '<a href="#" onclick="setMarking(false);return false" aria-label="Tap to sweep">Tap to 🧹</a>'
+          : '<a href="#" onclick="setMarking(true);return false" aria-label="Tap to flag">Tap to 🚩</a>')
         : 'Right-click to 🚩'}</div>
       <div><a href="#" onclick="confirmRestartMinisweeper();return false">New game</a></div>
     </div>
