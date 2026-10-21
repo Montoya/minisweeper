@@ -24,24 +24,23 @@
         document.documentElement.classList.add('player-embed');
       }
     </script>
-    <style type="text/css">
-      body { margin:0; padding:0; width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; }
-      #container { width:240px; align-self:center; }
-      h1 { font-size:24px; }
-      p { font-size:16px; font-weight:normal; }
-      h1, p { text-align:center; }
-      a, a:link, a:visited, a:active {color:rgb(0, 122, 255);font-weight:600; }
-      a:focus, a:hover {color:rgb(36, 172, 255) !important; text-decoration:none !important; }
-      .player-embed #container > h1,
-      .player-embed #container > p { display:none; }
-    </style>
   </head>
   <body>
+    <nav id="minisweeper-menu" aria-label="Game menu">
+      <button id="minisweeper-menu-button" type="button" aria-haspopup="true" aria-expanded="false" onclick="toggleGameMenu()">Game</button>
+      <div id="minisweeper-menu-items" hidden>
+        <button type="button" onclick="selectMinisweeperMode('beginner')">Beginner</button>
+        <button type="button" onclick="selectMinisweeperMode('intermediate')">Intermediate</button>
+        <button type="button" onclick="selectMinisweeperMode('expert')">Expert</button>
+        <button type="button" onclick="selectMinisweeperMode('custom')">Custom…</button>
+      </div>
+    </nav>
     <div id="container">
       <h1>Minisweeper</h1>
       <p>by <a href="https://christianmontoya.com">Montoya</a> &bull; <a href="https://github.com/Montoya/minisweeper">Source</a></p>
       <div id="game">Loading...</div>
     </div>
+    <div id="minisweeper-modal" class="minisweeper-modal" hidden></div>
     <script type="text/javascript" src="minisweeper.js"></script>
     <script type="text/javascript">
       startMinisweeper(document.getElementById('game')); 

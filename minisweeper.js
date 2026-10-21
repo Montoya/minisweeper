@@ -1,186 +1,239 @@
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(crypto.getRandomValues(new Uint32Array(1))[0]/4294967296 * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-}
+const MINISWEEPER_MODES = {
+  beginner: { width: 9, height: 9, mines: 10 },
+  intermediate: { width: 16, height: 16, mines: 40 },
+  expert: { width: 30, height: 16, mines: 99 }
+};
 
-function sweep(board, x, y) { 
-  const boardLength = Math.sqrt(board.length); 
-  const index = y*boardLength + x; 
-  if(index >= 0 && index < board.length) { 
-    // valid space 
-    if(board[index] > 9) { 
-      // valid space to sweep 
-      board[index] -= 10; 
-      if(0==board[index]) { // empty space, keep sweeping 
-        if(x>0) { 
-          sweep(board, x-1, y-1); 
-          sweep(board, x-1, y  ); 
-          sweep(board, x-1, y+1); 
-        }
-        sweep(board, x  , y-1); 
-        sweep(board, x  , y+1); 
-        if(x<(boardLength-1)) { 
-          sweep(board, x+1, y-1); 
-          sweep(board, x+1, y  ); 
-          sweep(board, x+1, y+1); 
-        }
-      }
-    }
-  }
-}
-
-function reveal(board) {
-  for(let i=0; i < board.length; i++) { 
-    if(19==board[i]) { 
-      board[i] = 9; 
-    }
-  }
-}
-
-function getHTMLforCell(num, x, y, marks, outcome) { 
-  switch(num) { 
-    case 0: 
-      return '<span class="minisweeper-cell minisweeper-empty">&nbsp;</span>'; 
-    case 1: 
-      return '<span class="minisweeper-cell minisweeper-number">1</span>'; 
-    case 2: 
-      return '<span class="minisweeper-cell minisweeper-number">2</span>'; 
-    case 3: 
-      return '<span class="minisweeper-cell minisweeper-number">3</span>'; 
-    case 4: 
-      return '<span class="minisweeper-cell minisweeper-number">4</span>'; 
-    case 5: 
-      return '<span class="minisweeper-cell minisweeper-number">5</span>'; 
-    case 6: 
-      return '<span class="minisweeper-cell minisweeper-number">6</span>'; 
-    case 7: 
-      return '<span class="minisweeper-cell minisweeper-number">7</span>'; 
-    case 8: 
-      return '<span class="minisweeper-cell minisweeper-number">8</span>'; 
-    case 9: 
-      return '<span class="minisweeper-cell minisweeper-bomb">💣</span>'; 
-    default: 
-      switch(outcome) { 
-        case "win": 
-          return '<span class="minisweeper-cell minisweeper-unrevealed">🚩</span>'; 
-        case "lose": 
-        case "confirm": 
-          return '<span class="minisweeper-cell minisweeper-unrevealed">&nbsp</span>'; 
-        default: 
-          return `<span onclick="attempt(${x},${y});return false" oncontextmenu="contextMenuCell(event,${x},${y});return false" class="minisweeper-cell minisweeper-unrevealed">${-1!=marks.indexOf(`${x}-${y}`) ? "🚩" : "&nbsp;"}</span>`;
-      }
-  }
-}
-
+let minisweeperState;
+let minisweeperElement;
 let marking = false;
+let facePressed = false;
+let showingStats = false;
+let timerInterval;
+let pendingMode = null;
+
+function saveMinisweeper() {
+  localStorage.setItem('minisweeperState', JSON.stringify(minisweeperState));
+}
+
+function emptyMinisweeperStats() {
+  return {
+    byMode: {
+      beginner: { games: 0, wins: 0 },
+      intermediate: { games: 0, wins: 0 },
+      expert: { games: 0, wins: 0 }
+    }
+  };
+}
+
+function normalizeMinisweeperStats(stats) {
+  const normalized = emptyMinisweeperStats();
+  if (!stats) return normalized;
+  if (stats.byMode) {
+    for (const difficulty of Object.keys(MINISWEEPER_MODES)) {
+      const entry = stats.byMode[difficulty];
+      if (entry) {
+        normalized.byMode[difficulty].games = Math.max(0, Number(entry.games) || 0);
+        normalized.byMode[difficulty].wins = Math.max(0, Number(entry.wins) || 0);
+      }
+    }
+    const unassignedGames = Math.max(0, Number(stats.unassigned?.games) || 0);
+    const unassignedWins = Math.max(0, Number(stats.unassigned?.wins) || 0);
+    // Earlier migrations held the known Beginner history here.
+    normalized.byMode.beginner.games += unassignedGames;
+    normalized.byMode.beginner.wins += unassignedWins;
+    return normalized;
+  }
+  normalized.byMode.beginner.games = Math.max(0, Number(stats.games) || 0);
+  normalized.byMode.beginner.wins = Math.max(0, Number(stats.wins) || 0);
+  return normalized;
+}
+
+function newMinisweeperState(mode, settings, stats) {
+  const nextStats = normalizeMinisweeperStats(stats);
+  if (nextStats.byMode[mode]) nextStats.byMode[mode].games++;
+  return {
+    mode, ...settings, board: null, marks: [], startedAt: null,
+    finishedAt: null, outcome: null,
+    stats: nextStats
+  };
+}
+
+function loadMinisweeperState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('minisweeperState'));
+    if (!saved || !Array.isArray(saved.marks)) return null;
+    if (Number.isInteger(saved.width) && Number.isInteger(saved.height) &&
+        Number.isInteger(saved.mines) &&
+        (saved.board === null || (Array.isArray(saved.board) && saved.board.length === saved.width * saved.height))) {
+      return { ...saved, stats: normalizeMinisweeperStats(saved.stats) };
+    }
+    // Keep games saved by the original 9×9 version playable after the upgrade.
+    if (!Array.isArray(saved.board) || saved.board.length !== 81) return null;
+    const mines = saved.board.filter(cell => cell === 9 || cell === 19).length;
+    const revealed = saved.board.some(cell => cell < 9);
+    const lost = !saved.board.includes(19);
+    const won = !lost && saved.board.filter(cell => cell > 9 && cell !== 19).length === 0;
+    return {
+      mode: 'beginner', width: 9, height: 9, mines,
+      board: !revealed && !lost ? null : saved.board, marks: saved.marks,
+      startedAt: revealed ? saved.startedAt : null,
+      finishedAt: lost || won ? (saved.finishedAt || Date.now()) : null,
+      outcome: lost ? 'lose' : won ? 'win' : null,
+      stats: normalizeMinisweeperStats(saved.stats || { games: 1, wins: 0 })
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function neighbors(index, width, height) {
+  const x = index % width;
+  const y = Math.floor(index / width);
+  const result = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) result.push(ny * width + nx);
+    }
+  }
+  return result;
+}
+
+function makeBoard(width, height, mines, firstIndex) {
+  const size = width * height;
+  const board = new Array(size).fill(0);
+  const candidates = [];
+  for (let i = 0; i < size; i++) {
+    if (mines === size || i !== firstIndex) candidates.push(i);
+  }
+  for (let i = 0; i < mines; i++) {
+    const random = crypto.getRandomValues(new Uint32Array(1))[0];
+    const pick = i + Math.floor(random / 4294967296 * (candidates.length - i));
+    [candidates[i], candidates[pick]] = [candidates[pick], candidates[i]];
+    board[candidates[i]] = 9;
+  }
+  for (let i = 0; i < size; i++) {
+    if (board[i] === 9) {
+      for (const neighbor of neighbors(i, width, height)) {
+        if (board[neighbor] !== 9) board[neighbor]++;
+      }
+    }
+  }
+  return board.map(cell => cell + 10);
+}
+
+function sweep(index) {
+  const state = minisweeperState;
+  const queue = [index];
+  while (queue.length) {
+    const current = queue.pop();
+    if (state.board[current] < 10) continue;
+    const x = current % state.width;
+    const y = Math.floor(current / state.width);
+    if (state.marks.includes(`${x}-${y}`)) continue;
+    state.board[current] -= 10;
+    if (state.board[current] === 0) {
+      for (const neighbor of neighbors(current, state.width, state.height)) {
+        if (state.board[neighbor] > 9 && state.board[neighbor] !== 19) queue.push(neighbor);
+      }
+    }
+  }
+}
+
+function attempt(x, y) {
+  const state = minisweeperState;
+  if (state.outcome || x < 0 || x >= state.width || y < 0 || y >= state.height) return;
+  const mark = `${x}-${y}`;
+  if (state.marks.includes(mark)) {
+    state.marks.splice(state.marks.indexOf(mark), 1);
+  } else if (marking) {
+    markCell(x, y);
+    return;
+  } else {
+    const index = y * state.width + x;
+    if (state.board === null) {
+      state.board = makeBoard(state.width, state.height, state.mines, index);
+      state.startedAt = Date.now();
+      startTimer();
+    }
+    sweep(index);
+    if (state.board[index] === 9) {
+      state.board = state.board.map(cell => cell === 19 ? 9 : cell);
+      state.outcome = 'lose';
+      state.finishedAt = Date.now();
+    } else if (state.board.every(cell => cell < 10 || cell === 19)) {
+      state.outcome = 'win';
+      state.finishedAt = Date.now();
+      if (state.stats.byMode[state.mode]) state.stats.byMode[state.mode].wins++;
+    }
+  }
+  displayBoard();
+  saveMinisweeper();
+}
+
+function markCell(x, y) {
+  const state = minisweeperState;
+  if (state.outcome || x < 0 || x >= state.width || y < 0 || y >= state.height) return;
+  if (state.board && state.board[y * state.width + x] < 10) return;
+  const key = `${x}-${y}`;
+  const index = state.marks.indexOf(key);
+  if (index < 0) state.marks.push(key);
+  else state.marks.splice(index, 1);
+  displayBoard();
+  saveMinisweeper();
+}
+
+function mark(x, y) { markCell(x, y); }
 
 function contextMenuCell(event, x, y) {
   event.preventDefault();
-  if(event.pointerType === 'touch' ||
-     (!event.pointerType && window.matchMedia('(hover: none) and (pointer: coarse)').matches)) return;
-  mark(x, y);
+  if (event.pointerType === 'touch' ||
+      (!event.pointerType && window.matchMedia('(hover: none) and (pointer: coarse)').matches)) return;
+  markCell(x, y);
 }
 
-function attempt(x,y) {
-  let outcome; 
-  if(-1!=minisweeperState.marks.indexOf(`${x}-${y}`)) { 
-    minisweeperState.marks.splice(minisweeperState.marks.indexOf(`${x}-${y}`), 1); 
+function getHTMLforCell(cell, x, y) {
+  const state = minisweeperState;
+  const key = `${x}-${y}`;
+  const label = `Row ${y + 1}, column ${x + 1}`;
+  if (state.outcome === 'win' && cell === 19) {
+    return `<span class="minisweeper-cell minisweeper-unrevealed" aria-label="${label}: mine flagged">🚩</span>`;
   }
-  else if(marking) {
-    mark(x, y);
-    return;
+  if (cell === null || cell > 9) {
+    const flagged = state.marks.includes(key);
+    const content = flagged ? '🚩' : '&nbsp;';
+    if (state.outcome) return `<span class="minisweeper-cell minisweeper-unrevealed" aria-label="${label}${flagged ? ': flagged' : ': hidden'}">${content}</span>`;
+    return `<span role="button" tabindex="0" aria-label="${label}${flagged ? ': flagged' : ': hidden'}" onclick="attempt(${x},${y})" onpointerdown="pressMinisweeperFace(event)" onkeydown="keyMinisweeperCell(event,${x},${y})" oncontextmenu="contextMenuCell(event,${x},${y})" class="minisweeper-cell minisweeper-unrevealed">${content}</span>`;
   }
-  else { 
-    sweep(minisweeperState.board, x, y); 
-    const index = y*Math.sqrt(minisweeperState.board.length) + x; 
-    if(minisweeperState.board[index]==9) { 
-      reveal(minisweeperState.board); 
-      outcome = "lose"; 
-    }
-    else if(minisweeperState.board.filter(el => el > 9).length < 11) { 
-      // there are only bombs left, the player has won 
-      minisweeperState.stats.wins += 1; 
-      minisweeperState.finishedAt = Date.now();
-      outcome = "win"; 
-    }
-  }
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks, outcome); 
-  localStorage.setItem("minisweeperState", JSON.stringify(minisweeperState)); 
+  if (cell === 9) return `<span class="minisweeper-cell minisweeper-bomb" aria-label="${label}: mine">💣</span>`;
+  return `<span class="minisweeper-cell ${cell ? 'minisweeper-number' : 'minisweeper-empty'}" aria-label="${label}: ${cell || 'empty'}">${cell || '&nbsp;'}</span>`;
 }
 
-function mark(x,y) { 
-  const markingString = `${x}-${y}`; 
-  const markedIndex = minisweeperState.marks.indexOf(markingString); 
-  if(-1==markedIndex) { 
-    minisweeperState.marks.push(markingString); 
+function keyMinisweeperCell(event, x, y) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    attempt(x, y);
+  } else if (event.key.toLowerCase() === 'f') {
+    event.preventDefault();
+    markCell(x, y);
   }
-  else { 
-    minisweeperState.marks.splice(markedIndex, 1);
-  }
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks); 
-  localStorage.setItem("minisweeperState", JSON.stringify(minisweeperState)); 
 }
 
-function makeBoard() { 
-  const board = [...new Array(10).fill(9),...new Array(71).fill(0)]; 
-  shuffleArray(board); 
-  // count spaces around bombs 
-  const boardLength = Math.sqrt(board.length); // must be a square number... 
-  for(let x = 0; x < boardLength; x++) { 
-    for(let y = 0; y < boardLength; y++) { 
-      // walk array 
-      const index = y*boardLength+x; 
-      if(board[index]==9) { 
-        // we are at a bomb
-        // let's try to add 1 to every square around this bomb 
-        // we have to do 8 iterations 
-        let tmpIndex; 
-        if(x > 0) { 
-          tmpIndex = (y-1)*boardLength+(x-1); // iteration 1
-          if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-            board[tmpIndex] += 1; 
-          }
-          tmpIndex = y*boardLength+(x-1); // iteration 2 
-          if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-            board[tmpIndex] += 1; 
-          }
-          tmpIndex = (y+1)*boardLength+(x-1); // iteration 3
-          if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-            board[tmpIndex] += 1; 
-          }
-        }
-        tmpIndex = (y-1)*boardLength+x; // iteration 4
-        if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-          board[tmpIndex] += 1; 
-        }
-        tmpIndex = (y+1)*boardLength+x; // iteration 5
-        if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-          board[tmpIndex] += 1; 
-        }
-        if(x < (boardLength-1)) { 
-          tmpIndex = (y-1)*boardLength+(x+1); // iteration 6
-          if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-            board[tmpIndex] += 1; 
-          }
-          tmpIndex = y*boardLength+(x+1); // iteration 7
-          if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-            board[tmpIndex] += 1; 
-          }
-          tmpIndex = (y+1)*boardLength+(x+1); // iteration 8
-          if(tmpIndex >= 0 && tmpIndex < board.length && board[tmpIndex] < 9) { 
-            board[tmpIndex] += 1; 
-          }
-        }
-      }
-    }
-  }
-  // finally, increment every space by 10 
-  for(let i = 0; i < board.length; i++) { 
-    board[i] += 10; 
-  }
-  return board; 
+function pressMinisweeperFace(event) {
+  if (event.button !== 0 || marking || minisweeperState.outcome) return;
+  facePressed = true;
+  const face = document.getElementById('minisweeper-face');
+  if (face) face.textContent = '😮';
+}
+
+function releaseMinisweeperFace() {
+  if (!facePressed) return;
+  facePressed = false;
+  const face = document.getElementById('minisweeper-face');
+  if (face && !minisweeperState.outcome) face.textContent = '🙂';
 }
 
 function formatElapsedTime(startedAt, finishedAt) {
@@ -188,184 +241,238 @@ function formatElapsedTime(startedAt, finishedAt) {
   const seconds = totalSeconds % 60;
   const minutes = Math.floor(totalSeconds / 60) % 60;
   const hours = Math.floor(totalSeconds / 3600);
-  if(hours) return `${hours}h ${minutes}m ${seconds}s`;
-  if(minutes) return `${minutes}m ${seconds}s`;
+  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
 }
 
-const displayBoard = (element, board, marks, outcome) => { 
-  element.textContent = ''; 
-  const boardLength = Math.sqrt(board.length); 
-  const board2D = []; 
-  for(let i = 0; i < board.length; i += boardLength) { 
-    board2D.push( board.slice(i,i+boardLength) ); 
-  }
-  const swept = board.filter(el => el < 9).length; 
-  const clear = Math.floor((swept/71)*100);
-  element.insertAdjacentHTML('beforeend', 
-`
-  <div id="minisweeper-board" style="text-align:center">
-    ${board2D.map( (row, y) => { 
-      return `
-        <div class="minisweeper-row" style="cursor:pointer">
-          ${row.map( (cell, x) => `${getHTMLforCell(cell, x, y, marks, outcome)}` ).join('')}
-        </div>
-      `; 
-    }).join('')}
-  </div>
-`
-  );
-  if(outcome=="confirm") { 
-    element.insertAdjacentHTML('beforeend', 
-      `
-        <div id="minisweeper-controls">
-          <div>
-            <div>Are you sure?</div>
-          </div>
-          <div>
-            <div><a href="#" onclick="cancelRestartMiniSweeper();return false">Cancel</a></div>
-            <div><a href="#" onclick="restartMinisweeper();return false">Confirm</a></div>
-          </div>
-        </div>
-      `
-          ); 
-  }
-  else if(outcome) { 
-    const canShareWin = outcome=="win" && Number.isFinite(minisweeperState.startedAt) &&
-      Number.isFinite(minisweeperState.finishedAt);
-    const shareText = outcome=="lose"
-      ? "I'm playing Minesweeper on X. Play it here: https://montoya.github.io/minisweeper/"
-      : canShareWin
-        ? `I just beat Minesweeper in ${formatElapsedTime(minisweeperState.startedAt, minisweeperState.finishedAt)}! Think you can do better? Play it: https://montoya.github.io/minisweeper/`
-        : '';
-    element.insertAdjacentHTML('beforeend', 
-`
-  <div id="minisweeper-controls">
-    <div>
-      <div>${outcome=="win" ? "😎 You won! Play again?" : "😵 You lost. Try again?"}</div>
-    </div>
-    <div>
-      <div>${shareText
-        ? `<a href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">Share</a>`
-        : '<a href="#" onclick="statsMinisweeper();return false">📊</a>'}</div>
-      <div><a href="#" onclick="restartMinisweeper();return false">New game</a></div>
-    </div>
-  </div>
-`
-    ); 
-  }
-  else { 
-    element.insertAdjacentHTML('beforeend', 
-`
-  <div id="minisweeper-controls">
-    <div>
-      <div>Cleared: ${clear}%</div>
-      <div><a href="#" onclick="statsMinisweeper();return false">📊</a></div>
-    </div>
-    <div>
-      <div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches
-        ? (marking
-          ? '<a href="#" onclick="setMarking(false);return false" aria-label="Tap to sweep">Tap to 🧹</a>'
-          : '<a href="#" onclick="setMarking(true);return false" aria-label="Tap to flag">Tap to 🚩</a>')
-        : 'Right-click to 🚩'}</div>
-      <div><a href="#" onclick="confirmRestartMinisweeper();return false">New game</a></div>
-    </div>
-  </div>
-`
-    ); 
-  }
+function elapsedSeconds() {
+  const state = minisweeperState;
+  return state.startedAt ? Math.floor(Math.max(0, (state.finishedAt || Date.now()) - state.startedAt) / 1000) : 0;
 }
 
-const setMarking = (value) => {
+function timerLabel() {
+  const seconds = elapsedSeconds();
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const timer = document.getElementById('minisweeper-timer');
+    if (timer) timer.textContent = timerLabel();
+  }, 250);
+}
+
+function displayBoard() {
+  if (showingStats) return;
+  const state = minisweeperState;
+  const size = state.width * state.height;
+  const safeCells = size - state.mines;
+  const swept = state.board ? state.board.filter(cell => cell >= 0 && cell < 9).length : 0;
+  const clear = safeCells ? Math.floor(swept / safeCells * 100) : 0;
+  const face = state.outcome === 'win' ? '😎' : state.outcome === 'lose' ? '😵' : facePressed ? '😮' : '🙂';
+  const faceLabel = state.outcome === 'win' ? 'You won. New game' : state.outcome === 'lose' ? 'You lost. New game' : 'New game';
+  const boardRows = [];
+  for (let y = 0; y < state.height; y++) {
+    let row = '';
+    for (let x = 0; x < state.width; x++) {
+      row += getHTMLforCell(state.board ? state.board[y * state.width + x] : null, x, y);
+    }
+    boardRows.push(`<div class="minisweeper-row">${row}</div>`);
+  }
+  const canShareWin = state.outcome === 'win' && Number.isFinite(state.startedAt) && Number.isFinite(state.finishedAt);
+  const shareText = state.outcome === 'lose'
+    ? "I'm playing Minesweeper on X. Play it here: https://montoya.github.io/minisweeper/"
+    : canShareWin
+      ? `I just beat Minesweeper in ${formatElapsedTime(state.startedAt, state.finishedAt)}! Think you can do better? Play it: https://montoya.github.io/minisweeper/`
+      : '';
+  const controls = state.outcome
+    ? `<div><div>${state.outcome === 'win' ? '😎 You won! Play again?' : '😵 You lost. Try again?'}</div></div>
+       <div><div><a href="#" onclick="statsMinisweeper();return false" aria-label="Stats">📊</a></div>
+       ${shareText ? `<div><a href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">Share</a></div>` : ''}
+       <div><a href="#" onclick="restartMinisweeper();return false">New game</a></div></div>`
+    : `<div><div>Cleared: ${clear}%</div><div><a href="#" onclick="statsMinisweeper();return false" aria-label="Stats">📊</a></div></div>
+       <div><div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches
+         ? (marking ? '<a href="#" onclick="setMarking(false);return false" aria-label="Tap to sweep">Tap to 🧹</a>' : '<a href="#" onclick="setMarking(true);return false" aria-label="Tap to flag">Tap to 🚩</a>')
+         : 'Right-click to 🚩'}</div>
+       <div><a href="#" onclick="confirmRestartMinisweeper();return false">New game</a></div></div>`;
+  minisweeperElement.innerHTML = `
+    <div class="minisweeper-board-scroll">
+      <div id="minisweeper-board" style="--columns:${state.width}">
+        <div class="minisweeper-header">
+          <span class="minisweeper-counter" aria-label="Mines remaining">${state.mines - state.marks.length} 💣</span>
+          <button id="minisweeper-face" type="button" class="minisweeper-face" onclick="confirmRestartMinisweeper()" aria-label="${faceLabel}">${face}</button>
+          <span id="minisweeper-timer" class="minisweeper-counter" aria-label="Elapsed time">${timerLabel()}</span>
+        </div>
+        <div class="minisweeper-grid" role="grid" aria-label="${state.width} by ${state.height} Minesweeper board">${boardRows.join('')}</div>
+      </div>
+    </div>
+    <div id="minisweeper-controls">${controls}</div>`;
+  document.getElementById('container').style.setProperty('--board-width', `${state.width * 26}px`);
+}
+
+function setMarking(value) {
   marking = value;
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks);
+  displayBoard();
   return false;
 }
 
-const confirmRestartMinisweeper = () => { 
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks, "confirm"); 
-  return false;
+function hasProgress() {
+  const state = minisweeperState;
+  return !state.outcome && (state.board !== null || state.marks.length > 0);
 }
 
-const cancelRestartMiniSweeper = () => { 
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks);
-  return false; 
+function closeGameMenu() {
+  document.getElementById('minisweeper-menu-items').hidden = true;
+  document.getElementById('minisweeper-menu-button').setAttribute('aria-expanded', 'false');
 }
 
-const restartMinisweeper = () => { 
+function toggleGameMenu() {
+  const items = document.getElementById('minisweeper-menu-items');
+  items.hidden = !items.hidden;
+  document.getElementById('minisweeper-menu-button').setAttribute('aria-expanded', String(!items.hidden));
+}
+
+function closeMinisweeperModal() {
+  document.getElementById('minisweeper-modal').hidden = true;
+  document.getElementById('minisweeper-modal').innerHTML = '';
+  pendingMode = null;
+}
+
+function showMinisweeperModal(html) {
+  const modal = document.getElementById('minisweeper-modal');
+  modal.innerHTML = `<div class="minisweeper-dialog" role="dialog" aria-modal="true" aria-labelledby="minisweeper-dialog-title">${html}</div>`;
+  modal.hidden = false;
+  modal.querySelector('input, button').focus();
+}
+
+function showAbandonConfirmation(mode, settings) {
+  pendingMode = { mode, settings };
+  showMinisweeperModal(`<h2 id="minisweeper-dialog-title">New game</h2>
+    <p>Are you sure you want to abandon your current game?</p>
+    <div class="minisweeper-dialog-actions">
+      <button type="button" onclick="closeMinisweeperModal()">Cancel</button>
+      <button type="button" onclick="acceptMinisweeperMode()">Yes</button>
+    </div>`);
+}
+
+function beginMinisweeperMode(mode, settings) {
+  closeMinisweeperModal();
+  showingStats = false;
   marking = false;
-  minisweeperState.board = makeBoard(); 
-  minisweeperState.marks = []; 
-  minisweeperState.startedAt = Date.now();
-  minisweeperState.finishedAt = null;
-  minisweeperState.stats.games++; 
-  localStorage.setItem("minisweeperState", JSON.stringify(minisweeperState)); 
-  startMinisweeper(minisweeperElement); 
+  facePressed = false;
+  minisweeperState = newMinisweeperState(mode, settings, minisweeperState.stats);
+  clearInterval(timerInterval);
+  displayBoard();
+  saveMinisweeper();
+}
+
+function acceptMinisweeperMode() {
+  if (pendingMode) beginMinisweeperMode(pendingMode.mode, pendingMode.settings);
+}
+
+function requestMinisweeperMode(mode, settings) {
+  if (hasProgress()) showAbandonConfirmation(mode, settings);
+  else beginMinisweeperMode(mode, settings);
+}
+
+function selectMinisweeperMode(mode) {
+  closeGameMenu();
+  if (mode === 'custom') {
+    const state = minisweeperState;
+    showMinisweeperModal(`<h2 id="minisweeper-dialog-title">Custom game</h2>
+      <form id="minisweeper-custom-form" onsubmit="submitCustomMinisweeper(event)">
+        <label>Width <input name="width" type="number" min="1" max="50" step="1" required value="${state.width}"></label>
+        <label>Height <input name="height" type="number" min="1" max="50" step="1" required value="${state.height}"></label>
+        <label>Mines <input name="mines" type="number" min="0" max="2500" step="1" required value="${state.mines}"></label>
+        <p id="minisweeper-custom-error" role="alert" hidden></p>
+        <div class="minisweeper-dialog-actions">
+          <button type="button" onclick="closeMinisweeperModal()">Cancel</button>
+          <button type="submit">OK</button>
+        </div>
+      </form>`);
+  } else if (MINISWEEPER_MODES[mode]) {
+    requestMinisweeperMode(mode, MINISWEEPER_MODES[mode]);
+  }
+}
+
+function submitCustomMinisweeper(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const width = Number(form.elements.width.value);
+  const height = Number(form.elements.height.value);
+  const mines = Number(form.elements.mines.value);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || !Number.isInteger(mines) ||
+      width < 1 || width > 50 || height < 1 || height > 50 || mines < 0 || mines > width * height) {
+    const error = document.getElementById('minisweeper-custom-error');
+    error.textContent = 'Use a width and height from 1 to 50, and mines from 0 to the number of spaces.';
+    error.hidden = false;
+    return;
+  }
+  requestMinisweeperMode('custom', { width, height, mines });
+}
+
+function confirmRestartMinisweeper() {
+  requestMinisweeperMode(minisweeperState.mode, {
+    width: minisweeperState.width, height: minisweeperState.height, mines: minisweeperState.mines
+  });
   return false;
 }
 
-const statsMinisweeper = () => { 
-  minisweeperElement.textContent = ''; 
-  minisweeperElement.insertAdjacentHTML('beforeend', 
-`
-    <div><b>Stats</b></div>
-    <div id="minisweeper-controls">
-      <hr />
-      <div>
-        <div>Games played</div>
-        <div>${minisweeperState.stats.games}</div>
-      </div>
-      <div>
-        <div>Games won</div>
-        <div>${minisweeperState.stats.wins}</div>
-      </div>
-      <div>
-        <div>Success rate</div>
-        <div>${(Math.round(minisweeperState.stats.wins *100) / minisweeperState.stats.games).toFixed(2)}%</div>
-      </div>
-      <hr />
-      <div>
-        <a href="#" onclick="goBackMinisweeper();return false" style="display:inline-block;text-align:center;width:100%">Go Back</a>
-      </div>
-    </div>
-`
-  ); 
+function cancelRestartMiniSweeper() {
+  closeMinisweeperModal();
   return false;
 }
 
-const goBackMinisweeper = () => { 
-  let outcome; 
-  if(minisweeperState.board.indexOf(19)==-1) { 
-    outcome = "lose"; 
-  }
-  else if(minisweeperState.board.filter(el => el > 9).length < 11) { 
-    outcome = "win";
-  } 
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks, outcome); 
-  return false; 
+function restartMinisweeper() {
+  beginMinisweeperMode(minisweeperState.mode, {
+    width: minisweeperState.width, height: minisweeperState.height, mines: minisweeperState.mines
+  });
+  return false;
 }
 
-var minisweeperState; 
-var minisweeperElement; 
+function statsMinisweeper() {
+  showingStats = true;
+  const labels = { beginner: 'Beginner', intermediate: 'Intermediate', expert: 'Expert' };
+  const rows = Object.keys(labels).map(mode => {
+    const { games, wins } = minisweeperState.stats.byMode[mode];
+    const rate = games ? `${Math.round(wins / games * 100)}%` : '—';
+    return `<tr><th scope="row">${labels[mode]}</th><td>${games}</td><td>${wins}</td><td>${rate}</td></tr>`;
+  }).join('');
+  minisweeperElement.innerHTML = `<div class="minisweeper-stats">
+    <h2>Stats</h2>
+    <table aria-label="Stats by difficulty">
+      <thead><tr><th scope="col">Difficulty</th><th scope="col">Played</th><th scope="col">Won</th><th scope="col">Win %</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <a class="minisweeper-stats-back" href="#" onclick="goBackMinisweeper();return false">Go Back</a>
+  </div>`;
+  return false;
+}
 
-const startMinisweeper = (element) => { 
-  minisweeperElement = element; 
-  minisweeperState = localStorage.getItem("minisweeperState"); 
-  if(minisweeperState) { 
-    minisweeperState = JSON.parse(minisweeperState); 
-  } else { 
-    minisweeperState = { board: makeBoard(), marks: [], startedAt: Date.now(), finishedAt: null, stats: { games:1, wins: 0 }};
-  } 
-  let outcome; 
-  if(minisweeperState.board.indexOf(19)==-1) { 
-    outcome = "lose"; 
-  }
-  else if(minisweeperState.board.filter(el => el > 9).length < 11) { 
-    outcome = "win";
-  } 
-  if(outcome === undefined && !Number.isFinite(minisweeperState.startedAt)) {
-    minisweeperState.startedAt = Date.now();
-  }
-  displayBoard(minisweeperElement, minisweeperState.board, minisweeperState.marks, outcome); 
-  localStorage.setItem("minisweeperState", JSON.stringify(minisweeperState)); 
+function goBackMinisweeper() {
+  showingStats = false;
+  displayBoard();
+  return false;
+}
+
+function startMinisweeper(element) {
+  minisweeperElement = element;
+  minisweeperState = loadMinisweeperState() || newMinisweeperState('beginner', MINISWEEPER_MODES.beginner);
+  displayBoard();
+  startTimer();
+  saveMinisweeper();
+  document.addEventListener('click', event => {
+    if (!event.target.closest('#minisweeper-menu')) closeGameMenu();
+    if (event.target.id === 'minisweeper-modal') closeMinisweeperModal();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      closeGameMenu();
+      closeMinisweeperModal();
+    }
+  });
+  document.addEventListener('pointerup', releaseMinisweeperFace);
+  document.addEventListener('pointercancel', releaseMinisweeperFace);
 }
