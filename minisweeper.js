@@ -264,9 +264,40 @@ function startTimer() {
   }, 250);
 }
 
+function calculateMinisweeperCellSize(width, height, viewportWidth, viewportHeight, horizontalPadding, verticalPadding, otherContentHeight) {
+  const byWidth = (viewportWidth - horizontalPadding) / width;
+  const byHeight = (viewportHeight - verticalPadding - otherContentHeight) / height;
+  return Math.max(5, Math.floor(Math.min(26, byWidth, byHeight) * 10) / 10);
+}
+
+function fitMinisweeperBoard() {
+  const grid = document.querySelector('.minisweeper-grid');
+  if (!grid) return;
+  const container = document.getElementById('container');
+  const bodyStyle = getComputedStyle(document.body);
+  const horizontalPadding = parseFloat(bodyStyle.paddingLeft) + parseFloat(bodyStyle.paddingRight);
+  const verticalPadding = parseFloat(bodyStyle.paddingTop) + parseFloat(bodyStyle.paddingBottom);
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  for (let pass = 0; pass < 3; pass++) {
+    const previous = parseFloat(getComputedStyle(grid).getPropertyValue('--minisweeper-cell-size'));
+    const otherContentHeight = container.getBoundingClientRect().height - grid.getBoundingClientRect().height;
+    const size = calculateMinisweeperCellSize(
+      minisweeperState.width, minisweeperState.height,
+      viewportWidth, viewportHeight, horizontalPadding, verticalPadding, otherContentHeight
+    );
+    container.style.setProperty('--minisweeper-cell-size', `${size}px`);
+    container.style.setProperty('--board-width', `${minisweeperState.width * size}px`);
+    if (Math.abs(previous - size) < 0.1) break;
+  }
+}
+
 function displayBoard() {
   if (showingStats) return;
   const state = minisweeperState;
+  const container = document.getElementById('container');
+  container.style.setProperty('--minisweeper-cell-size', '26px');
+  container.style.setProperty('--board-width', `${state.width * 26}px`);
   const size = state.width * state.height;
   const safeCells = size - state.mines;
   const swept = state.board ? state.board.filter(cell => cell >= 0 && cell < 9).length : 0;
@@ -309,7 +340,7 @@ function displayBoard() {
       </div>
     </div>
     <div id="minisweeper-controls">${controls}</div>`;
-  document.getElementById('container').style.setProperty('--board-width', `${state.width * 26}px`);
+  fitMinisweeperBoard();
 }
 
 function setMarking(value) {
@@ -475,4 +506,6 @@ function startMinisweeper(element) {
   });
   document.addEventListener('pointerup', releaseMinisweeperFace);
   document.addEventListener('pointercancel', releaseMinisweeperFace);
+  window.addEventListener('resize', fitMinisweeperBoard);
+  window.visualViewport?.addEventListener('resize', fitMinisweeperBoard);
 }

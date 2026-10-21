@@ -14,6 +14,7 @@ body {
   background: #fff;
 }
 #container {
+  display: flow-root;
   width: min(calc(100vw - 24px), max(240px, var(--board-width, 240px)));
 }
 h1 { font-size: 24px; }
@@ -23,6 +24,7 @@ a, a:link, a:visited, a:active { color: var(--minisweeper-blue); font-weight: 60
 a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !important; }
 .player-embed #container > h1,
 .player-embed #container > p { display: none; }
+.player-embed body { padding-top: 50px; padding-bottom: 10px; }
 
 #minisweeper-menu {
   position: fixed;
@@ -68,7 +70,7 @@ a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !i
 .minisweeper-board-scroll { max-width: 100%; overflow-x: auto; }
 #minisweeper-board { width: calc(var(--columns) * var(--minisweeper-cell-size)); }
 .minisweeper-header {
-  height: 44px;
+  height: clamp(28px, calc(var(--minisweeper-cell-size) * 1.7), 44px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -78,14 +80,19 @@ a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !i
   border: 1px solid #dedede;
   border-bottom: 0;
 }
-.minisweeper-counter { min-width: 55px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.minisweeper-counter {
+  min-width: clamp(32px, calc(var(--minisweeper-cell-size) * 2.1), 55px);
+  font-size: clamp(10px, calc(var(--minisweeper-cell-size) * .62), 16px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
 #minisweeper-timer { text-align: right; }
 .minisweeper-face {
   border: 0;
   background: transparent;
   padding: 1px 3px;
   font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-  font-size: 23px;
+  font-size: clamp(16px, calc(var(--minisweeper-cell-size) * .9), 23px);
   line-height: 1;
   cursor: pointer;
 }
@@ -98,12 +105,12 @@ a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !i
   align-items: center;
   justify-content: center;
   background: #f0f0f0;
-  border: 2px solid #f0f0f0;
-  font-size: 16px;
+  border: clamp(1px, calc(var(--minisweeper-cell-size) * .08), 2px) solid #f0f0f0;
+  font-size: clamp(6px, calc(var(--minisweeper-cell-size) * .62), 16px);
   line-height: 1;
 }
 .minisweeper-unrevealed {
-  border: 2px outset #ececec;
+  border: clamp(1px, calc(var(--minisweeper-cell-size) * .08), 2px) outset #ececec;
   background: #c0c0c0;
   cursor: pointer;
   touch-action: manipulation;
