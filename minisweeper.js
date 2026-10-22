@@ -3,6 +3,7 @@ const MINISWEEPER_MODES = {
   intermediate: { width: 16, height: 16, mines: 40 },
   expert: { width: 30, height: 16, mines: 99 }
 };
+const MINISWEEPER_SHARE_URL = 'https://minisweeper-x.vercel.app/';
 
 let minisweeperState;
 let minisweeperElement;
@@ -337,7 +338,7 @@ function compareMinisweeperResults(state, challenge) {
 
 function minisweeperChallengeURL() {
   const state = minisweeperState;
-  const url = new URL('./', window.location.href);
+  const url = new URL(MINISWEEPER_SHARE_URL);
   url.searchParams.set('seed', state.seed);
   url.searchParams.set('first', state.firstIndex);
   url.searchParams.set('w', state.width);
@@ -363,6 +364,13 @@ function setMinisweeperShareLink() {
   link.href = intent.toString();
 }
 
+function canShareMinisweeperResult(state) {
+  const host = window.location.hostname;
+  return host !== 'github.io' && !host.endsWith('.github.io') &&
+    Number.isInteger(state.seed) && Number.isInteger(state.firstIndex) &&
+    Number.isFinite(state.startedAt) && Number.isFinite(state.finishedAt);
+}
+
 function showMinisweeperResult() {
   const state = minisweeperState;
   if (!state.outcome) return;
@@ -374,15 +382,14 @@ function showMinisweeperResult() {
     <p><strong>Challenger:</strong> ${challenge.outcome === 'win' ? `cleared the board in ${formatScore(challenge.seconds)}` : `cleared ${challenge.cleared}% in ${formatScore(challenge.seconds)} before hitting a mine`}.</p>
     <p>${compareMinisweeperResults(state, challenge)}</p>
   </div>` : '';
-  const canShare = Number.isInteger(state.seed) && Number.isInteger(state.firstIndex) &&
-    Number.isFinite(state.startedAt) && Number.isFinite(state.finishedAt);
+  const canShare = canShareMinisweeperResult(state);
   showMinisweeperModal(`<h2 id="minisweeper-dialog-title">${state.outcome === 'win' ? '😎 You won!' : '😵 Game over'}</h2>
     <p>${score}</p>${comparison}
     ${canShare ? `<h3 class="minisweeper-challenge-title">Challenge others to this board</h3>
       <p>Share your result so others can play the same board and try to beat it.</p>` : ''}
     <div class="minisweeper-dialog-actions">
       ${canShare ? '<a id="minisweeper-share-link" class="minisweeper-share-button" target="_blank" rel="noopener noreferrer">Post</a>' : ''}
-      <button type="button" onclick="closeMinisweeperModal()">Skip</button>
+      <button type="button" onclick="closeMinisweeperModal()">${canShare ? 'Skip' : 'OK'}</button>
     </div>`);
   setMinisweeperShareLink();
 }
@@ -470,7 +477,7 @@ function displayBoard() {
   const controls = state.outcome
     ? `<div><div>${state.outcome === 'win' ? '😎 You won! Play again?' : '😵 You lost. Try again?'}</div></div>
        <div><div><a href="#" onclick="statsMinisweeper();return false" aria-label="Stats">📊</a></div>
-       <div><a href="#" onclick="showMinisweeperResult();return false">Results / Share</a></div>
+       <div><a href="#" onclick="showMinisweeperResult();return false">${canShareMinisweeperResult(state) ? 'Results / Share' : 'Results'}</a></div>
        <div><a href="#" onclick="restartMinisweeper();return false">New game</a></div></div>`
     : `<div><div>Cleared: ${clear}%</div><div><a href="#" onclick="statsMinisweeper();return false" aria-label="Stats">📊</a></div></div>
        <div><div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches

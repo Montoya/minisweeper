@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const template = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');
+const playerBaseUrl = 'https://minisweeper-x.vercel.app/';
 const challengeKeys = ['seed', 'first', 'w', 'h', 'm', 'result', 'time', 'cleared'];
 
 function integerParam(params, key, min, max) {
@@ -30,10 +31,9 @@ function escapeAttribute(value) {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-function pageHtml(baseUrl, params) {
-  const player = new URL(baseUrl);
+function pageHtml(params) {
+  const player = new URL(playerBaseUrl);
   player.searchParams.set('embed', '1');
-  player.searchParams.set('v', '2');
   const challenge = challengeParams(params);
   if (challenge) {
     for (const key of challengeKeys) player.searchParams.set(key, challenge[key]);
@@ -42,7 +42,7 @@ function pageHtml(baseUrl, params) {
     .replace(/<meta name="twitter:player" content="[^"]*">/,
       `<meta name="twitter:player" content="${escapeAttribute(player.href)}">`)
     .replace(/<meta name="twitter:image" content="[^"]*">/,
-      `<meta name="twitter:image" content="${escapeAttribute(new URL('player-card.jpg', baseUrl).href)}">`);
+      `<meta name="twitter:image" content="${escapeAttribute(new URL('player-card.jpg', playerBaseUrl).href)}">`);
 }
 
 function handler(req, res) {
@@ -52,17 +52,10 @@ function handler(req, res) {
     res.end();
     return;
   }
-  const host = req.headers.host;
-  if (typeof host !== 'string' || !/^[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(host)) {
-    res.statusCode = 400;
-    res.end('Invalid host');
-    return;
-  }
-  const baseUrl = `https://${host}/`;
-  const params = new URL(req.url || '/', baseUrl).searchParams;
+  const params = new URL(req.url || '/', playerBaseUrl).searchParams;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=300');
-  res.end(req.method === 'HEAD' ? '' : pageHtml(baseUrl, params));
+  res.end(req.method === 'HEAD' ? '' : pageHtml(params));
 }
 
 module.exports = handler;
