@@ -12,6 +12,59 @@ let showingStats = false;
 let timerInterval;
 let pendingMode = null;
 
+function randomMinisweeperSeed() {
+  return crypto.getRandomValues(new Uint32Array(1))[0];
+}
+
+function seededRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value = (value + 0x6D2B79F5) >>> 0;
+    let result = Math.imul(value ^ (value >>> 15), 1 | value);
+    result ^= result + Math.imul(result ^ (result >>> 7), 61 | result);
+    return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function validMinisweeperSettings(width, height, mines) {
+  return Number.isInteger(width) && width >= 1 && width <= 50 &&
+    Number.isInteger(height) && height >= 1 && height <= 50 &&
+    Number.isInteger(mines) && mines >= 0 && mines <= width * height;
+}
+
+function readMinisweeperChallenge() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('seed')) return null;
+  if (['first', 'w', 'h', 'm', 'result', 'time', 'cleared'].some(key => !params.has(key))) return null;
+  const seed = Number(params.get('seed'));
+  const firstIndex = Number(params.get('first'));
+  const width = Number(params.get('w'));
+  const height = Number(params.get('h'));
+  const mines = Number(params.get('m'));
+  const seconds = Number(params.get('time'));
+  const cleared = Number(params.get('cleared'));
+  const outcome = params.get('result');
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff ||
+      !validMinisweeperSettings(width, height, mines) ||
+      !Number.isInteger(firstIndex) || firstIndex < 0 || firstIndex >= width * height ||
+      !['win', 'lose'].includes(outcome) ||
+      !Number.isInteger(seconds) || seconds < 0 || seconds > 86400 * 30 ||
+      !Number.isInteger(cleared) || cleared < 0 || cleared > 100) return null;
+  return { seed, firstIndex, width, height, mines, outcome, seconds, cleared };
+}
+
+function challengeKey(challenge) {
+  return JSON.stringify(challenge);
+}
+
+function clearMinisweeperChallengeURL() {
+  const url = new URL(window.location.href);
+  for (const key of ['seed', 'first', 'w', 'h', 'm', 'result', 'time', 'cleared', 'by']) {
+    url.searchParams.delete(key);
+  }
+  history.replaceState(null, '', url);
+}
+
 function saveMinisweeper() {
   localStorage.setItem('minisweeperState', JSON.stringify(minisweeperState));
 }
@@ -49,12 +102,13 @@ function normalizeMinisweeperStats(stats) {
   return normalized;
 }
 
-function newMinisweeperState(mode, settings, stats) {
+function newMinisweeperState(mode, settings, stats, challenge = null) {
   const nextStats = normalizeMinisweeperStats(stats);
   if (nextStats.byMode[mode]) nextStats.byMode[mode].games++;
   return {
     mode, ...settings, board: null, marks: [], startedAt: null,
-    finishedAt: null, outcome: null,
+    finishedAt: null, outcome: null, seed: challenge?.seed ?? randomMinisweeperSeed(),
+    firstIndex: challenge?.firstIndex ?? null, challenge,
     stats: nextStats
   };
 }
@@ -66,7 +120,12 @@ function loadMinisweeperState() {
     if (Number.isInteger(saved.width) && Number.isInteger(saved.height) &&
         Number.isInteger(saved.mines) &&
         (saved.board === null || (Array.isArray(saved.board) && saved.board.length === saved.width * saved.height))) {
-      return { ...saved, stats: normalizeMinisweeperStats(saved.stats) };
+      return {
+        ...saved,
+        seed: Number.isInteger(saved.seed) ? saved.seed : (saved.board === null ? randomMinisweeperSeed() : null),
+        firstIndex: saved.firstIndex ?? null,
+        stats: normalizeMinisweeperStats(saved.stats)
+      };
     }
     // Keep games saved by the original 9×9 version playable after the upgrade.
     if (!Array.isArray(saved.board) || saved.board.length !== 81) return null;
@@ -102,16 +161,16 @@ function neighbors(index, width, height) {
   return result;
 }
 
-function makeBoard(width, height, mines, firstIndex) {
+function makeBoard(width, height, mines, firstIndex, seed) {
   const size = width * height;
   const board = new Array(size).fill(0);
   const candidates = [];
   for (let i = 0; i < size; i++) {
     if (mines === size || i !== firstIndex) candidates.push(i);
   }
+  const random = seededRandom(seed);
   for (let i = 0; i < mines; i++) {
-    const random = crypto.getRandomValues(new Uint32Array(1))[0];
-    const pick = i + Math.floor(random / 4294967296 * (candidates.length - i));
+    const pick = i + Math.floor(random() * (candidates.length - i));
     [candidates[i], candidates[pick]] = [candidates[pick], candidates[i]];
     board[candidates[i]] = 9;
   }
@@ -155,7 +214,8 @@ function attempt(x, y) {
   } else {
     const index = y * state.width + x;
     if (state.board === null) {
-      state.board = makeBoard(state.width, state.height, state.mines, index);
+      if (state.firstIndex === null) state.firstIndex = index;
+      state.board = makeBoard(state.width, state.height, state.mines, state.firstIndex, state.seed);
       state.startedAt = Date.now();
       startTimer();
     }
@@ -172,6 +232,11 @@ function attempt(x, y) {
   }
   displayBoard();
   saveMinisweeper();
+  if (state.outcome && !state.resultPrompted) {
+    state.resultPrompted = true;
+    saveMinisweeper();
+    showMinisweeperResult();
+  }
 }
 
 function markCell(x, y) {
@@ -236,19 +301,90 @@ function releaseMinisweeperFace() {
   if (face && !minisweeperState.outcome) face.textContent = '🙂';
 }
 
-function formatElapsedTime(startedAt, finishedAt) {
-  const totalSeconds = Math.floor(Math.max(0, finishedAt - startedAt) / 1000);
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60) % 60;
-  const hours = Math.floor(totalSeconds / 3600);
-  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
 function elapsedSeconds() {
   const state = minisweeperState;
   return state.startedAt ? Math.floor(Math.max(0, (state.finishedAt || Date.now()) - state.startedAt) / 1000) : 0;
+}
+
+function clearedPercent(state) {
+  const safeCells = state.width * state.height - state.mines;
+  const swept = state.board ? state.board.filter(cell => cell >= 0 && cell < 9).length : 0;
+  return safeCells ? Math.floor(swept / safeCells * 100) : 0;
+}
+
+function resultSeconds(state) {
+  if (!Number.isFinite(state.startedAt) || !Number.isFinite(state.finishedAt)) return 0;
+  return Math.floor(Math.max(0, state.finishedAt - state.startedAt) / 1000);
+}
+
+function formatScore(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function compareMinisweeperResults(state, challenge) {
+  const player = { outcome: state.outcome, seconds: resultSeconds(state), cleared: clearedPercent(state) };
+  if (player.outcome !== challenge.outcome) return player.outcome === 'win' ? 'You beat the challenge!' : 'The challenger did better this time.';
+  if (player.outcome === 'win') {
+    if (player.seconds < challenge.seconds) return `You beat the challenge by ${formatScore(challenge.seconds - player.seconds)}!`;
+    if (player.seconds > challenge.seconds) return `The challenger was faster by ${formatScore(player.seconds - challenge.seconds)}.`;
+    return 'You matched the challenger’s time!';
+  }
+  if (player.cleared > challenge.cleared) return `You cleared ${player.cleared - challenge.cleared}% more of the board.`;
+  if (player.cleared < challenge.cleared) return `The challenger cleared ${challenge.cleared - player.cleared}% more of the board.`;
+  return 'You cleared the same amount of the board.';
+}
+
+function minisweeperChallengeURL() {
+  const state = minisweeperState;
+  const url = new URL('./', window.location.href);
+  url.searchParams.set('seed', state.seed);
+  url.searchParams.set('first', state.firstIndex);
+  url.searchParams.set('w', state.width);
+  url.searchParams.set('h', state.height);
+  url.searchParams.set('m', state.mines);
+  url.searchParams.set('result', state.outcome);
+  url.searchParams.set('time', resultSeconds(state));
+  url.searchParams.set('cleared', clearedPercent(state));
+  return url.toString();
+}
+
+function setMinisweeperShareLink() {
+  const link = document.getElementById('minisweeper-share-link');
+  if (!link) return;
+  const state = minisweeperState;
+  const time = formatScore(resultSeconds(state));
+  const message = state.outcome === 'win'
+    ? `I cleared this Minesweeper board in ${time}! Think you can do better? Take my challenge:`
+    : `I cleared ${clearedPercent(state)}% of this Minesweeper board before hitting a mine in ${time}. Can you do better? Take my challenge:`;
+  const intent = new URL('https://twitter.com/intent/tweet');
+  intent.searchParams.set('text', message);
+  intent.searchParams.set('url', minisweeperChallengeURL());
+  link.href = intent.toString();
+}
+
+function showMinisweeperResult() {
+  const state = minisweeperState;
+  if (!state.outcome) return;
+  const score = state.outcome === 'win'
+    ? `You cleared the board in ${formatScore(resultSeconds(state))}.`
+    : `You cleared ${clearedPercent(state)}% of the board in ${formatScore(resultSeconds(state))}.`;
+  const challenge = state.challenge;
+  const comparison = challenge ? `<div class="minisweeper-comparison">
+    <p><strong>Challenger:</strong> ${challenge.outcome === 'win' ? `cleared the board in ${formatScore(challenge.seconds)}` : `cleared ${challenge.cleared}% in ${formatScore(challenge.seconds)} before hitting a mine`}.</p>
+    <p>${compareMinisweeperResults(state, challenge)}</p>
+  </div>` : '';
+  const canShare = Number.isInteger(state.seed) && Number.isInteger(state.firstIndex) &&
+    Number.isFinite(state.startedAt) && Number.isFinite(state.finishedAt);
+  showMinisweeperModal(`<h2 id="minisweeper-dialog-title">${state.outcome === 'win' ? '😎 You won!' : '😵 Game over'}</h2>
+    <p>${score}</p>${comparison}
+    ${canShare ? `<h3 class="minisweeper-challenge-title">Challenge others to this board</h3>
+      <p>Share your result so others can play the same board and try to beat it.</p>` : ''}
+    <div class="minisweeper-dialog-actions">
+      ${canShare ? '<a id="minisweeper-share-link" class="minisweeper-share-button" target="_blank" rel="noopener noreferrer">Post</a>' : ''}
+      <button type="button" onclick="closeMinisweeperModal()">Skip</button>
+    </div>`);
+  setMinisweeperShareLink();
 }
 
 function timerLabel() {
@@ -298,10 +434,7 @@ function displayBoard() {
   const container = document.getElementById('container');
   container.style.setProperty('--minisweeper-cell-size', '26px');
   container.style.setProperty('--board-width', `${state.width * 26}px`);
-  const size = state.width * state.height;
-  const safeCells = size - state.mines;
-  const swept = state.board ? state.board.filter(cell => cell >= 0 && cell < 9).length : 0;
-  const clear = safeCells ? Math.floor(swept / safeCells * 100) : 0;
+  const clear = clearedPercent(state);
   const face = state.outcome === 'win' ? '😎' : state.outcome === 'lose' ? '😵' : facePressed ? '😮' : '🙂';
   const faceLabel = state.outcome === 'win' ? 'You won. New game' : state.outcome === 'lose' ? 'You lost. New game' : 'New game';
   const boardRows = [];
@@ -312,16 +445,10 @@ function displayBoard() {
     }
     boardRows.push(`<div class="minisweeper-row">${row}</div>`);
   }
-  const canShareWin = state.outcome === 'win' && Number.isFinite(state.startedAt) && Number.isFinite(state.finishedAt);
-  const shareText = state.outcome === 'lose'
-    ? "I'm playing Minesweeper on X. Play it here: https://montoya.github.io/minisweeper/"
-    : canShareWin
-      ? `I just beat Minesweeper in ${formatElapsedTime(state.startedAt, state.finishedAt)}! Think you can do better? Play it: https://montoya.github.io/minisweeper/`
-      : '';
   const controls = state.outcome
     ? `<div><div>${state.outcome === 'win' ? '😎 You won! Play again?' : '😵 You lost. Try again?'}</div></div>
        <div><div><a href="#" onclick="statsMinisweeper();return false" aria-label="Stats">📊</a></div>
-       ${shareText ? `<div><a href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">Share</a></div>` : ''}
+       <div><a href="#" onclick="showMinisweeperResult();return false">Results / Share</a></div>
        <div><a href="#" onclick="restartMinisweeper();return false">New game</a></div></div>`
     : `<div><div>Cleared: ${clear}%</div><div><a href="#" onclick="statsMinisweeper();return false" aria-label="Stats">📊</a></div></div>
        <div><div>${window.matchMedia('(hover: none) and (pointer: coarse)').matches
@@ -375,7 +502,7 @@ function showMinisweeperModal(html) {
   const modal = document.getElementById('minisweeper-modal');
   modal.innerHTML = `<div class="minisweeper-dialog" role="dialog" aria-modal="true" aria-labelledby="minisweeper-dialog-title">${html}</div>`;
   modal.hidden = false;
-  modal.querySelector('input, button').focus();
+  modal.querySelector('input, button, a[href]').focus();
 }
 
 function showAbandonConfirmation(mode, settings) {
@@ -390,6 +517,7 @@ function showAbandonConfirmation(mode, settings) {
 
 function beginMinisweeperMode(mode, settings) {
   closeMinisweeperModal();
+  clearMinisweeperChallengeURL();
   showingStats = false;
   marking = false;
   facePressed = false;
@@ -490,7 +618,21 @@ function goBackMinisweeper() {
 
 function startMinisweeper(element) {
   minisweeperElement = element;
-  minisweeperState = loadMinisweeperState() || newMinisweeperState('beginner', MINISWEEPER_MODES.beginner);
+  const challenge = readMinisweeperChallenge();
+  const saved = loadMinisweeperState();
+  const sameChallenge = challenge && saved && saved.challenge &&
+    challengeKey(saved.challenge) === challengeKey(challenge);
+  const challengeMode = challenge && Object.keys(MINISWEEPER_MODES).find(mode => {
+    const settings = MINISWEEPER_MODES[mode];
+    return settings.width === challenge.width && settings.height === challenge.height && settings.mines === challenge.mines;
+  }) || 'custom';
+  minisweeperState = challenge
+    ? (sameChallenge ? saved : newMinisweeperState(challengeMode, {
+        width: challenge.width, height: challenge.height, mines: challenge.mines
+      }, saved?.stats, challenge))
+    : (saved?.challenge ? newMinisweeperState(saved.mode, {
+        width: saved.width, height: saved.height, mines: saved.mines
+      }, saved.stats) : saved) || newMinisweeperState('beginner', MINISWEEPER_MODES.beginner);
   displayBoard();
   startTimer();
   saveMinisweeper();
