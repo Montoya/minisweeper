@@ -387,6 +387,28 @@ function showMinisweeperResult() {
   setMinisweeperShareLink();
 }
 
+function showMinisweeperChallengeIntro(challenge) {
+  const mode = Object.keys(MINISWEEPER_MODES).find(key => {
+    const settings = MINISWEEPER_MODES[key];
+    return settings.width === challenge.width && settings.height === challenge.height && settings.mines === challenge.mines;
+  });
+  const difficulty = mode ? mode[0].toUpperCase() + mode.slice(1) : 'Custom';
+  const result = challenge.outcome === 'win'
+    ? 'Cleared the board'
+    : `Hit a mine after clearing ${challenge.cleared}%`;
+  showMinisweeperModal(`<h2 id="minisweeper-dialog-title">You've been challenged!</h2>
+    <p>Play the same board and see if you can beat this result.</p>
+    <dl class="minisweeper-challenge-stats">
+      <div><dt>Difficulty</dt><dd>${difficulty}</dd></div>
+      <div><dt>Board</dt><dd>${challenge.width} × ${challenge.height} · ${challenge.mines} mines</dd></div>
+      <div><dt>Result</dt><dd>${result}</dd></div>
+      <div><dt>Time</dt><dd>${formatScore(challenge.seconds)}</dd></div>
+    </dl>
+    <div class="minisweeper-dialog-actions minisweeper-dialog-actions-centered">
+      <button type="button" onclick="closeMinisweeperModal()">Play</button>
+    </div>`);
+}
+
 function timerLabel() {
   const seconds = elapsedSeconds();
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -650,4 +672,7 @@ function startMinisweeper(element) {
   document.addEventListener('pointercancel', releaseMinisweeperFace);
   window.addEventListener('resize', fitMinisweeperBoard);
   window.visualViewport?.addEventListener('resize', fitMinisweeperBoard);
+  if (challenge && !minisweeperState.startedAt && !minisweeperState.outcome) {
+    showMinisweeperChallengeIntro(challenge);
+  }
 }
