@@ -379,8 +379,7 @@ function showMinisweeperResult() {
     : `You cleared ${clearedPercent(state)}% of the board in ${formatScore(resultSeconds(state))}.`;
   const challenge = state.challenge;
   const comparison = challenge ? `<div class="minisweeper-comparison">
-    <p><strong>Challenger:</strong> ${challenge.outcome === 'win' ? `cleared the board in ${formatScore(challenge.seconds)}` : `cleared ${challenge.cleared}% in ${formatScore(challenge.seconds)} before hitting a mine`}.</p>
-    <p>${compareMinisweeperResults(state, challenge)}</p>
+    <p><strong>Challenger:</strong> ${challenge.outcome === 'win' ? `cleared the board in ${formatScore(challenge.seconds)}` : `cleared ${challenge.cleared}% in ${formatScore(challenge.seconds)} before hitting a mine`}. ${compareMinisweeperResults(state, challenge)}</p>
   </div>` : '';
   const canShare = canShareMinisweeperResult(state);
   showMinisweeperModal(`<h2 id="minisweeper-dialog-title">${state.outcome === 'win' ? '😎 You won!' : '😵 Game over'}</h2>
