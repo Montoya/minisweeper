@@ -249,7 +249,9 @@ function cancelMinisweeperResultAnimation() {
   if (confettiFrame !== undefined) cancelAnimationFrame(confettiFrame);
   confettiFrame = undefined;
   confettiLayer?.replaceChildren();
-  document.getElementById('minisweeper-board')?.classList.remove('minisweeper-shaking');
+  const board = document.getElementById('minisweeper-board');
+  board?.classList.remove('minisweeper-shaking');
+  board?.parentElement?.classList.remove('minisweeper-shake-clip');
 }
 
 function showerMinisweeperConfetti(tile) {
@@ -310,8 +312,17 @@ function animateMinisweeperResult(x, y) {
   if (state.outcome === 'win') {
     const tile = document.querySelector('.minisweeper-grid')?.children[y]?.children[x];
     if (tile) showerMinisweeperConfetti(tile);
-  } else if (state.outcome === 'lose') {
-    document.getElementById('minisweeper-board')?.classList.add('minisweeper-shaking');
+  } else if (state.outcome === 'lose' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const board = document.getElementById('minisweeper-board');
+    if (board) {
+      const scroll = board.parentElement;
+      scroll.classList.add('minisweeper-shake-clip');
+      board.addEventListener('animationend', () => {
+        board.classList.remove('minisweeper-shaking');
+        scroll.classList.remove('minisweeper-shake-clip');
+      }, { once: true });
+      board.classList.add('minisweeper-shaking');
+    }
   }
   resultAnimationTimer = setTimeout(() => {
     resultAnimationTimer = null;

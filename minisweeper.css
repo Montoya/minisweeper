@@ -68,6 +68,7 @@ a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !i
 #minisweeper-menu-items button:focus-visible { background: #f0f5ff; }
 
 .minisweeper-board-scroll { max-width: 100%; overflow-x: auto; }
+.minisweeper-board-scroll.minisweeper-shake-clip { overflow: hidden; }
 #minisweeper-board { width: calc(var(--columns) * var(--minisweeper-cell-size)); }
 #minisweeper-board.minisweeper-shaking { animation: minisweeper-board-shake 420ms ease-in-out; }
 @keyframes minisweeper-board-shake {
