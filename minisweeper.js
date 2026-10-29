@@ -12,6 +12,9 @@ let facePressed = false;
 let showingStats = false;
 let timerInterval;
 let pendingMode = null;
+let resultAnimationTimer;
+let confettiFrame;
+let confettiLayer;
 
 function randomMinisweeperSeed() {
   return crypto.getRandomValues(new Uint32Array(1))[0];
@@ -236,8 +239,84 @@ function attempt(x, y) {
   if (state.outcome && !state.resultPrompted) {
     state.resultPrompted = true;
     saveMinisweeper();
-    showMinisweeperResult();
+    animateMinisweeperResult(x, y);
   }
+}
+
+function cancelMinisweeperResultAnimation() {
+  clearTimeout(resultAnimationTimer);
+  resultAnimationTimer = null;
+  if (confettiFrame !== undefined) cancelAnimationFrame(confettiFrame);
+  confettiFrame = undefined;
+  confettiLayer?.replaceChildren();
+  document.getElementById('minisweeper-board')?.classList.remove('minisweeper-shaking');
+}
+
+function showerMinisweeperConfetti(tile) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!confettiLayer) {
+    confettiLayer = document.createElement('div');
+    confettiLayer.className = 'minisweeper-effects';
+    confettiLayer.setAttribute('aria-hidden', 'true');
+    document.body.append(confettiLayer);
+  }
+  const rect = tile.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const colors = ['#007aff', '#ffcc00', '#ff4b65', '#31c48d', '#8d5cf6', '#ff8a32'];
+  const pieces = [];
+  for (let i = 0; i < 44; i++) {
+    const angle = (i / 44) * Math.PI * 2 + Math.random() * .35;
+    const speed = 130 + Math.random() * 130;
+    const piece = document.createElement('span');
+    piece.className = 'minisweeper-confetti';
+    piece.style.left = `${centerX}px`;
+    piece.style.top = `${centerY}px`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.width = `${5 + Math.random() * 5}px`;
+    piece.style.height = `${7 + Math.random() * 6}px`;
+    pieces.push({
+      element: piece,
+      velocityX: Math.cos(angle) * speed,
+      velocityY: -190 - Math.random() * 95 + Math.sin(angle) * 55,
+      gravity: 520 + Math.random() * 170,
+      rotation: (Math.random() - .5) * 900,
+      duration: 1.05 + Math.random() * .3
+    });
+  }
+  confettiLayer.replaceChildren(...pieces.map(piece => piece.element));
+  let start;
+  function animate(now) {
+    if (start === undefined) start = now;
+    const elapsed = (now - start) / 1000;
+    let active = false;
+    for (const piece of pieces) {
+      const t = Math.min(elapsed, piece.duration);
+      const progress = t / piece.duration;
+      const x = piece.velocityX * t;
+      const y = piece.velocityY * t + .5 * piece.gravity * t * t;
+      piece.element.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${piece.rotation * t}deg)`;
+      piece.element.style.opacity = String(Math.min(1, (1 - progress) * 3));
+      if (progress < 1) active = true;
+    }
+    if (active) confettiFrame = requestAnimationFrame(animate);
+    else confettiLayer.replaceChildren();
+  }
+  confettiFrame = requestAnimationFrame(animate);
+}
+
+function animateMinisweeperResult(x, y) {
+  const state = minisweeperState;
+  if (state.outcome === 'win') {
+    const tile = document.querySelector('.minisweeper-grid')?.children[y]?.children[x];
+    if (tile) showerMinisweeperConfetti(tile);
+  } else if (state.outcome === 'lose') {
+    document.getElementById('minisweeper-board')?.classList.add('minisweeper-shaking');
+  }
+  resultAnimationTimer = setTimeout(() => {
+    resultAnimationTimer = null;
+    if (minisweeperState === state && !showingStats) showMinisweeperResult(true);
+  }, 800);
 }
 
 function markCell(x, y) {
@@ -371,9 +450,13 @@ function canShareMinisweeperResult(state) {
     Number.isFinite(state.startedAt) && Number.isFinite(state.finishedAt);
 }
 
-function showMinisweeperResult() {
+function showMinisweeperResult(animated = false) {
   const state = minisweeperState;
   if (!state.outcome) return;
+  if (!animated) {
+    clearTimeout(resultAnimationTimer);
+    resultAnimationTimer = null;
+  }
   const score = state.outcome === 'win'
     ? `You cleared the board in ${formatScore(resultSeconds(state))}.`
     : `You cleared ${clearedPercent(state)}% of the board in ${formatScore(resultSeconds(state))}.`;
@@ -389,7 +472,7 @@ function showMinisweeperResult() {
     <div class="minisweeper-dialog-actions">
       ${canShare ? '<a id="minisweeper-share-link" class="minisweeper-share-button" target="_blank" rel="noopener noreferrer">Post</a>' : ''}
       <button type="button" onclick="closeMinisweeperModal()">${canShare ? 'Skip' : 'OK'}</button>
-    </div>`);
+    </div>`, animated);
   setMinisweeperShareLink();
 }
 
@@ -521,14 +604,17 @@ function toggleGameMenu() {
 }
 
 function closeMinisweeperModal() {
-  document.getElementById('minisweeper-modal').hidden = true;
-  document.getElementById('minisweeper-modal').innerHTML = '';
+  const modal = document.getElementById('minisweeper-modal');
+  modal.hidden = true;
+  modal.classList.remove('minisweeper-modal-entrance');
+  modal.innerHTML = '';
   pendingMode = null;
 }
 
-function showMinisweeperModal(html) {
+function showMinisweeperModal(html, animated = false) {
   const modal = document.getElementById('minisweeper-modal');
   modal.innerHTML = `<div class="minisweeper-dialog" role="dialog" aria-modal="true" aria-labelledby="minisweeper-dialog-title">${html}</div>`;
+  modal.classList.toggle('minisweeper-modal-entrance', animated);
   modal.hidden = false;
   modal.querySelector('input, button, a[href]').focus();
 }
@@ -544,6 +630,7 @@ function showAbandonConfirmation(mode, settings) {
 }
 
 function beginMinisweeperMode(mode, settings) {
+  cancelMinisweeperResultAnimation();
   closeMinisweeperModal();
   clearMinisweeperChallengeURL();
   showingStats = false;
@@ -620,6 +707,7 @@ function restartMinisweeper() {
 }
 
 function statsMinisweeper() {
+  cancelMinisweeperResultAnimation();
   showingStats = true;
   const labels = { beginner: 'Beginner', intermediate: 'Intermediate', expert: 'Expert' };
   const rows = Object.keys(labels).map(mode => {

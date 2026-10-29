@@ -69,6 +69,29 @@ a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !i
 
 .minisweeper-board-scroll { max-width: 100%; overflow-x: auto; }
 #minisweeper-board { width: calc(var(--columns) * var(--minisweeper-cell-size)); }
+#minisweeper-board.minisweeper-shaking { animation: minisweeper-board-shake 420ms ease-in-out; }
+@keyframes minisweeper-board-shake {
+  0%, 100% { transform: translateX(0); }
+  14% { transform: translateX(-4px); }
+  28% { transform: translateX(4px); }
+  42% { transform: translateX(-3px); }
+  56% { transform: translateX(3px); }
+  70% { transform: translateX(-2px); }
+  84% { transform: translateX(2px); }
+}
+.minisweeper-effects {
+  position: fixed;
+  z-index: 15;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.minisweeper-confetti {
+  position: absolute;
+  border-radius: 1px;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
 .minisweeper-header {
   height: clamp(28px, calc(var(--minisweeper-cell-size) * 1.7), 44px);
   display: flex;
@@ -169,6 +192,15 @@ a:focus, a:hover { color: rgb(36, 172, 255) !important; text-decoration: none !i
   justify-content: center;
   padding: 16px;
   background: #0005;
+}
+.minisweeper-modal-entrance { animation: minisweeper-modal-fade 500ms ease both; }
+@keyframes minisweeper-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #minisweeper-board.minisweeper-shaking,
+  .minisweeper-modal-entrance { animation: none; }
 }
 .minisweeper-dialog {
   width: min(100%, 330px);
