@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minisweeper result animation prototype</title>
+  <style>
+    :root { --blue: #007aff; --cell: 26px; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; padding: 68px 16px 32px; display: grid; place-items: center; background: #fff; color: #151515; }
+    .menu { position: fixed; inset: 0 0 auto; height: 42px; padding: 8px 16px; border-bottom: 1px solid #e5e5e5; background: #fff; color: var(--blue); font-weight: 600; }
+    main { width: min(100%, 360px); text-align: center; }
+    h1 { margin: 0 0 3px; font-size: 24px; }
+    .byline { margin: 0 0 24px; font-size: 16px; }
+    a { color: var(--blue); font-weight: 600; }
+    .demo-controls { display: flex; justify-content: center; gap: 8px; margin: 0 0 13px; }
+    button { font: inherit; cursor: pointer; }
+    .demo-controls button { padding: 6px 11px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155; }
+    .demo-controls button[aria-pressed="true"] { border-color: var(--blue); background: #eaf3ff; color: #0058b8; font-weight: 600; }
+    .instruction { min-height: 2.6em; margin: 0 0 12px; color: #555; font-size: 13px; line-height: 1.3; }
+    #minisweeper-board { width: calc(9 * var(--cell)); margin: 0 auto; transform-origin: center; }
+    .game-header { height: 44px; padding: 4px 5px; display: flex; align-items: center; justify-content: space-between; background: #f0f0f0; border: 1px solid #dedede; border-bottom: 0; }
+    .counter { min-width: 55px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .counter:last-child { text-align: right; }
+    .face { padding: 1px 3px; border: 0; background: none; font-size: 23px; line-height: 1; }
+    .row { display: flex; height: var(--cell); }
+    .cell { width: var(--cell); height: var(--cell); flex: none; display: grid; place-items: center; border: 2px solid #f0f0f0; background: #f0f0f0; font-size: 16px; line-height: 1; }
+    .cell.hidden { border: 2px outset #ececec; background: #c0c0c0; }
+    .cell.final { position: relative; cursor: pointer; color: transparent; }
+    .cell.final::after { content: ""; position: absolute; inset: -4px; border: 2px solid var(--blue); border-radius: 3px; pointer-events: none; animation: pulse 1.5s ease-in-out infinite; }
+    .cell.final:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+    .cell.number { font-weight: 700; }
+    .cell[data-number="1"] { color: blue; }
+    .cell[data-number="2"] { color: green; }
+    .cell[data-number="3"] { color: red; }
+    .cell[data-number="4"] { color: navy; }
+    .cell[data-number="5"] { color: maroon; }
+    .cell[data-number="6"] { color: teal; }
+    #game-footer { width: calc(9 * var(--cell)); margin: 12px auto 0; text-align: left; font-size: 13px; }
+    #game-footer > div { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    #effects { position: fixed; inset: 0; z-index: 15; pointer-events: none; overflow: hidden; }
+    .confetti { position: absolute; width: 7px; height: 11px; border-radius: 1px; background: var(--color); pointer-events: none; will-change: transform, opacity; }
+    #result-modal[hidden] { display: none; }
+    #result-modal { position: fixed; z-index: 20; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: #0005; opacity: 0; transition: opacity 500ms ease; }
+    #result-modal.open { opacity: 1; }
+    .dialog { width: min(100%, 330px); padding: 20px; border: 1px solid #dedede; border-radius: 6px; background: #fff; box-shadow: 0 12px 32px #0002; text-align: left; }
+    .dialog h2 { margin: 0 0 12px; font-size: 19px; }
+    .dialog p { margin: 0 0 16px; font-size: 16px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; }
+    .dialog-actions button { padding: 5px 8px; border: 0; background: none; color: var(--blue); font-weight: 600; }
+    #minisweeper-board.shaking { animation: board-shake 420ms ease-in-out; }
+    @keyframes pulse { 50% { opacity: .3; } }
+    @keyframes board-shake {
+      0%, 100% { transform: translateX(0); }
+      14% { transform: translateX(-4px); }
+      28% { transform: translateX(4px); }
+      42% { transform: translateX(-3px); }
+      56% { transform: translateX(3px); }
+      70% { transform: translateX(-2px); }
+      84% { transform: translateX(2px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .cell.final::after, #minisweeper-board.shaking { animation: none; }
+      #result-modal { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="menu">Game</div>
+  <main>
+    <h1>Minisweeper</h1>
+    <p class="byline">Result animation prototype</p>
+    <div class="demo-controls" aria-label="Choose an outcome">
+      <button id="win-button" type="button" aria-pressed="true">Preview win</button>
+      <button id="lose-button" type="button" aria-pressed="false">Preview loss</button>
+    </div>
+    <p id="instruction" class="instruction">Click the outlined tile to finish the board.</p>
+    <div id="minisweeper-board" aria-label="Sample 9 by 9 Minesweeper board">
+      <div class="game-header">
+        <span class="counter">1 💣</span>
+        <button id="face" class="face" type="button" aria-label="Reset preview">🙂</button>
+        <span class="counter">00:42</span>
+      </div>
+      <div id="grid"></div>
+    </div>
+    <div id="game-footer"><div><span>Cleared: 98%</span><span>📊</span></div><div><span>Right-click to 🚩</span><a href="#" id="reset-link">New game</a></div></div>
+  </main>
+  <div id="effects" aria-hidden="true"></div>
+  <div id="result-modal" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="result-title">
+      <h2 id="result-title"></h2>
+      <p id="result-description"></p>
+      <div class="dialog-actions">
+        <button id="replay-button" type="button">Replay</button>
+        <button id="close-button" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const grid = document.getElementById('grid');
+    const board = document.getElementById('minisweeper-board');
+    const modal = document.getElementById('result-modal');
+    const effects = document.getElementById('effects');
+    const instruction = document.getElementById('instruction');
+    const winButton = document.getElementById('win-button');
+    const loseButton = document.getElementById('lose-button');
+    const face = document.getElementById('face');
+    const footer = document.getElementById('game-footer');
+    const finalIndex = 40;
+    const baseMines = [0, 7, 12, 19, 25, 33, 49, 58, 66, 79];
+    let outcome = 'win';
+    let finished = false;
+    let modalTimer;
+    let focusTimer;
+    let effectsFrame;
+
+    function adjacentMines(index, mines) {
+      const x = index % 9, y = Math.floor(index / 9);
+      let count = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < 9 && ny >= 0 && ny < 9 && mines.has(ny * 9 + nx)) count++;
+      }
+      return count;
+    }
+
+    function drawBoard() {
+      const mines = new Set(outcome === 'win' ? baseMines : [...baseMines, finalIndex]);
+      const rows = [];
+      for (let y = 0; y < 9; y++) {
+        const cells = [];
+        for (let x = 0; x < 9; x++) {
+          const index = y * 9 + x;
+          const cell = document.createElement(index === finalIndex && !finished ? 'button' : 'span');
+          cell.className = 'cell';
+          if (index === finalIndex && !finished) {
+            cell.classList.add('hidden', 'final');
+            cell.type = 'button';
+            cell.setAttribute('aria-label', `Final tile: ${outcome === 'win' ? 'win' : 'lose'}`);
+            cell.addEventListener('click', finishGame);
+          } else if (index === finalIndex && finished && outcome === 'lose') {
+            cell.textContent = '💣';
+          } else if (mines.has(index)) {
+            cell.classList.add('hidden');
+            if (outcome === 'win' && (finished || index !== 79)) cell.textContent = '🚩';
+          } else if (outcome === 'lose' && !finished && (index % 7 === 0 || index > 62)) {
+            cell.classList.add('hidden');
+          } else {
+            const count = adjacentMines(index, mines);
+            if (count) { cell.classList.add('number'); cell.dataset.number = String(count); cell.textContent = String(count); }
+          }
+          cells.push(cell);
+        }
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.append(...cells);
+        rows.push(row);
+      }
+      grid.replaceChildren(...rows);
+      board.querySelector('.counter').textContent = `${finished && outcome === 'win' ? 0 : outcome === 'win' ? 1 : 11} 💣`;
+      face.textContent = finished ? outcome === 'win' ? '😎' : '😵' : '🙂';
+      footer.firstElementChild.firstElementChild.textContent = finished ? outcome === 'win' ? '😎 You won! Play again?' : '😵 You lost. Try again?' : outcome === 'win' ? 'Cleared: 98%' : 'Cleared: 73%';
+    }
+
+    function showerFrom(tile) {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const rect = tile.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const colors = ['#007aff', '#ffcc00', '#ff4b65', '#31c48d', '#8d5cf6', '#ff8a32'];
+      const pieces = [];
+      for (let i = 0; i < 44; i++) {
+        const angle = (i / 44) * Math.PI * 2 + Math.random() * .35;
+        const speed = 130 + Math.random() * 130;
+        const piece = document.createElement('span');
+        piece.className = 'confetti';
+        piece.style.left = `${centerX}px`;
+        piece.style.top = `${centerY}px`;
+        piece.style.setProperty('--color', colors[i % colors.length]);
+        piece.style.width = `${5 + Math.random() * 5}px`;
+        piece.style.height = `${7 + Math.random() * 6}px`;
+        pieces.push({
+          element: piece,
+          velocityX: Math.cos(angle) * speed,
+          velocityY: -190 - Math.random() * 95 + Math.sin(angle) * 55,
+          gravity: 520 + Math.random() * 170,
+          rotation: (Math.random() - .5) * 900,
+          duration: 1.05 + Math.random() * .3
+        });
+      }
+      effects.replaceChildren(...pieces.map(piece => piece.element));
+      let start;
+      function animate(now) {
+        if (start === undefined) start = now;
+        const elapsed = (now - start) / 1000;
+        let active = false;
+        for (const piece of pieces) {
+          const t = Math.min(elapsed, piece.duration);
+          const progress = t / piece.duration;
+          const x = piece.velocityX * t;
+          const y = piece.velocityY * t + .5 * piece.gravity * t * t;
+          piece.element.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${piece.rotation * t}deg)`;
+          piece.element.style.opacity = String(Math.min(1, (1 - progress) * 3));
+          if (progress < 1) active = true;
+        }
+        if (active) effectsFrame = requestAnimationFrame(animate);
+        else effects.replaceChildren();
+      }
+      effectsFrame = requestAnimationFrame(animate);
+    }
+
+    function finishGame(event) {
+      if (finished) return;
+      const tile = event.currentTarget;
+      finished = true;
+      if (outcome === 'win') showerFrom(tile);
+      drawBoard();
+      if (outcome === 'lose') {
+        board.classList.remove('shaking');
+        void board.offsetWidth;
+        board.classList.add('shaking');
+      }
+      instruction.textContent = outcome === 'win' ? 'Board cleared!' : 'Mine hit!';
+      // The board remains unobscured for 800 ms, then the modal fades for 500 ms.
+      modalTimer = setTimeout(showResult, 800);
+    }
+
+    function showResult() {
+      document.getElementById('result-title').textContent = outcome === 'win' ? '😎 You won!' : '😵 Game over';
+      document.getElementById('result-description').textContent = outcome === 'win' ? 'You cleared the board in 0:42.' : 'You cleared 73% of the board in 0:42.';
+      modal.hidden = false;
+      requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('open')));
+      focusTimer = setTimeout(() => document.getElementById('replay-button').focus(), 500);
+    }
+
+    function reset(nextOutcome = outcome) {
+      clearTimeout(modalTimer);
+      clearTimeout(focusTimer);
+      cancelAnimationFrame(effectsFrame);
+      outcome = nextOutcome;
+      finished = false;
+      modal.classList.remove('open');
+      modal.hidden = true;
+      board.classList.remove('shaking');
+      effects.replaceChildren();
+      winButton.setAttribute('aria-pressed', String(outcome === 'win'));
+      loseButton.setAttribute('aria-pressed', String(outcome === 'lose'));
+      instruction.textContent = 'Click the outlined tile to finish the board.';
+      drawBoard();
+    }
+
+    winButton.addEventListener('click', () => reset('win'));
+    loseButton.addEventListener('click', () => reset('lose'));
+    face.addEventListener('click', () => reset());
+    document.getElementById('reset-link').addEventListener('click', event => { event.preventDefault(); reset(); });
+    document.getElementById('replay-button').addEventListener('click', () => reset());
+    document.getElementById('close-button').addEventListener('click', () => { modal.classList.remove('open'); modal.hidden = true; });
+    modal.addEventListener('click', event => { if (event.target === modal) { modal.classList.remove('open'); modal.hidden = true; } });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape' && !modal.hidden) { modal.classList.remove('open'); modal.hidden = true; } });
+    reset('win');
+  </script>
+</body>
+</html>
